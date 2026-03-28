@@ -1,154 +1,102 @@
-
-from models.transaction import (
-    Transaction,
-    CreditTransaction,
-    DebitTransaction,
-    TransactionStatus,
-)
+import os
+from models.transaction import TransactionStatus
 from services.processor import TransactionProcessor
 from services.analytics import TransactionAnalytics
+from file_handlers.reader import TransactionFileReader
+from file_handlers.writer import TransactionFileWriter
+
 
 def main():
-    # ──────────────────────────────────────────
-    # 1. Create transactions — mix of valid and invalid
-    # ──────────────────────────────────────────
-    transactions: list[Transaction] = [
-        # Valid credits (within limit)
-        CreditTransaction(
-            id="TXN001", amount=50000, currency="INR",
-            status=TransactionStatus.PENDING, created_at="2025-01-15",
-            credit_limit=100000,
-        ),
-        CreditTransaction(
-            id="TXN002", amount=25000, currency="USD",
-            status=TransactionStatus.PENDING, created_at="2025-01-15",
-            credit_limit=50000,
-        ),
+    input_file = "data/transactions.csv"
+    output_dir = "data/output"
 
-        # Invalid credit — exceeds limit (should FAIL)
-        CreditTransaction(
-            id="TXN003", amount=150000, currency="INR",
-            status=TransactionStatus.PENDING, created_at="2025-01-16",
-            credit_limit=100000,
-        ),
+    os.makedirs(output_dir, exist_ok=True)
 
-        # Valid debits (within balance)
-        DebitTransaction(
-            id="TXN004", amount=2000, currency="INR",
-            status=TransactionStatus.PENDING, created_at="2025-01-16",
-            account_balance=50000,
-        ),
-        DebitTransaction(
-            id="TXN005", amount=8000, currency="EUR",
-            status=TransactionStatus.PENDING, created_at="2025-01-17",
-            account_balance=30000,
-        ),
-
-        # Invalid debit — exceeds balance (should FAIL)
-        DebitTransaction(
-            id="TXN006", amount=75000, currency="INR",
-            status=TransactionStatus.PENDING, created_at="2025-01-17",
-            account_balance=50000,
-        ),
-
-        # Invalid — negative amount (should FAIL)
-        CreditTransaction(
-            id="TXN007", amount=-500, currency="INR",
-            status=TransactionStatus.PENDING, created_at="2025-01-18",
-        ),
-
-        # Valid ones
-        DebitTransaction(
-            id="TXN008", amount=1200, currency="USD",
-            status=TransactionStatus.PENDING, created_at="2025-01-18",
-            account_balance=5000,
-        ),
-        CreditTransaction(
-            id="TXN009", amount=90000, currency="INR",
-            status=TransactionStatus.PENDING, created_at="2025-01-19",
-            credit_limit=100000,
-        ),
-        DebitTransaction(
-            id="TXN010", amount=300, currency="EUR",
-            status=TransactionStatus.PENDING, created_at="2025-01-19",
-            account_balance=10000,
-        ),
-    ]
-
-    # ──────────────────────────────────────────
-    # 2. Create processor and add transactions
-    # ──────────────────────────────────────────
+    reader = TransactionFileReader()
+    writer = TransactionFileWriter()
     processor = TransactionProcessor()
-    processor.add_many(transactions)
-
-    print(f"Loaded {len(processor.transactions)} transactions")
 
     # ──────────────────────────────────────────
-    # 3. Process all
+    # Step 1: Read from CSV
     # ──────────────────────────────────────────
-    results = processor.process_all()
+    print("STEP 1: Reading transactions from CSV...")
+    print("-" * 50)
+
+    transactions, parse_errors = reader.read_csv(input_file)
+    # This returns TWO values — tuple unpacking
+    # Ruby equivalent: transactions, parse_errors = reader.read_csv(input_file)
+
+    if parse_errors:
+        print(f"\nParse errors found:")
+        for error in parse_errors:
+            print(f"  {error}")
 
     # ──────────────────────────────────────────
-    # 4. Print each result
+    # Step 2: Process all transactions
     # ──────────────────────────────────────────
     print()
-    print("PROCESSING RESULTS:")
+    print("STEP 2: Processing transactions...")
     print("-" * 50)
+
+    processor.add_many(transactions)
+    results = processor.process_all()
+
     for result in results:
         print(f"  {result}")
 
-    # ──────────────────────────────────────────
-    # 5. Print summary
-    # ──────────────────────────────────────────
     processor.print_summary()
 
     # ──────────────────────────────────────────
-    # 6. Query processed data
+    # Step 3: Run analytics
     # ──────────────────────────────────────────
+    print()
+    print("STEP 3: Running analytics...")
+    print("-" * 50)
+
+    analytics = TransactionAnalytics(transactions)
+    analytics.print_report()
+
+    # ──────────────────────────────────────────
+    # Step 4: Write results to files
+    # ──────────────────────────────────────────
+    print()
+    print("STEP 4: Writing output files...")
+    print("-" * 50)
+
     completed = processor.get_completed()
     failed = processor.get_failed()
 
-    print()
-    print(f"Completed transaction IDs: {[t.id for t in completed]}")
-    print(f"Failed transaction IDs:    {[t.id for t in failed]}")
-
-    # Verify statuses actually changed
-    print()
-    print("STATUS CHECK:")
-    for txn in transactions:
-        print(f"  {txn.id}: {txn.status.value}")
-
-    # ──────────────────────────────────────────
-    # 7. Analytics — Day 4
-    # ──────────────────────────────────────────
-    analytics = TransactionAnalytics(transactions)
-
-    # Full report
-    analytics.print_report()
-
-    # Play with individual methods
-    print("\n--- Individual method demos ---\n")
-
-    # Group by status
-    groups = analytics.group_by_status()
-    for status, txns in groups.items():
-        print(f"{status.value}: {[t.id for t in txns]}")
-
-    # Unique currencies
-    print(f"\nCurrencies used: {analytics.unique_currencies()}")
-
-    # Build index — O(1) lookup
-    index = analytics.build_index()
-    print(f"\nLookup TXN003: {index['TXN003']}")
-
-    # Filter with lambda
-    high_value = analytics.filter_by(lambda t: t.amount > 10000)
-    print(f"\nHigh value (>10K): {[t.id for t in high_value]}")
-
-    inr_completed = analytics.filter_by(
-        lambda t: t.currency == "INR" and t.status == TransactionStatus.COMPLETED
+    writer.write_transactions_csv(
+        completed,
+        os.path.join(output_dir, "completed.csv"),
     )
-    print(f"INR + Completed: {[t.id for t in inr_completed]}")
+
+    writer.write_transactions_csv(
+        failed,
+        os.path.join(output_dir, "failed.csv"),
+    )
+
+    writer.write_errors(
+        parse_errors,
+        os.path.join(output_dir, "parse_errors.txt"),
+    )
+
+    # ──────────────────────────────────────────
+    # Step 5: Final summary
+    # ──────────────────────────────────────────
+    print()
+    print("=" * 50)
+    print("  PIPELINE COMPLETE")
+    print("=" * 50)
+    print(f"  Input:          {input_file}")
+    print(f"  Total rows:     {len(transactions) + len(parse_errors)}")
+    print(f"  Parsed OK:      {len(transactions)}")
+    print(f"  Parse errors:   {len(parse_errors)}")
+    print(f"  Completed:      {len(completed)}")
+    print(f"  Failed:         {len(failed)}")
+    print(f"  Output dir:     {output_dir}/")
+    print("=" * 50)
+
 
 if __name__ == "__main__":
     main()
