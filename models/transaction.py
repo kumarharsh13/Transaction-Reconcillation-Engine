@@ -37,11 +37,11 @@ class Transaction:
     )
   
   def validate(self) -> None:
-      if self.amount <= 0:
-          raise InvalidTransactionException(
-              error_code="INVALID_AMOUNT",
-              message=f"Amount must be positive, got {self.amount}",
-          )
+    if self.amount <= 0:
+      raise InvalidTransactionException(
+          error_code="INVALID_AMOUNT",
+          message=f"Amount must be positive, got {self.amount}",
+      )
   
 class CreditTransaction(Transaction):
   def __init__(self, id: str, amount: float, status: TransactionStatus, currency: str, created_at: str, credit_limit: float = 100_000.0) -> None:

@@ -25,7 +25,18 @@ class TransactionFileReader:
 
     print(f"Read {row_count} rows: {len(transactions)} success, {len(errors)} errors")
     return transactions, errors
+
+  def read_csv_lazy(self, filepath: str):
+    with open(filepath, "r") as file:
+      reader = csv.DictReader(file)
   
+      for row_num, row in enumerate(reader, start=2):
+        try:
+          txn = self._parse_transaction(row)
+          yield txn, None
+        except Exception as e:
+          yield None, f"Row {row_num}: {e}"
+
   def _parse_transaction(self, row: dict) -> Transaction:
     txn_id = row.get('id').strip()
     txn_type = row.get('type').strip().upper()
