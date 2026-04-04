@@ -1,15 +1,21 @@
-from fastapi import FastAPI, HTTPException
-from typing import Optional
 import uuid
-from datetime import datetime
+import csv
+import io
 
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
+from typing import Optional
+from datetime import datetime
 from models.schemas import (
   TransactionCreate,
   TransactionResponse,
   TransactionUpdate,
   TransactionType,
   TransactionStatusEnum,
-  ProcessingSummary
+  ProcessingSummary,
+  BatchTransactionCreate,
+  BatchResult,
+  UploadResult,
 )
 
 app = FastAPI(
@@ -145,3 +151,150 @@ async def health_check():
     "status": "healthy",
     "transactions_count": len(transactions_db),
   }
+
+@app.post("/upload/csv", response_model = UploadResult)
+async def upload_csv(file: UploadFile = File(...)):
+  content = await file.read()
+  text = content.decode("utf-8")
+
+  csv_reader = csv.DictReader(io.StringIO(text))
+  created, row_count, errors = 0, 0, []
+  for row_num, row in enumerate(csv_reader, start = 2):
+    row_count += 1
+    try:
+      txn_type = row.get("type", "").strip().upper()
+      amount = float(row.get("amount", 0))
+      currency = row.get("currency", "").strip().upper()
+
+      txn_id = generate_id()
+      now = datetime.now().isoformat()
+
+      txn_data = {
+        "id": txn_id,
+        "amount": amount,
+        "currency": currency,
+        "type": txn_type,
+        "status": TransactionStatusEnum.PENDING.value,
+        "created_at": now,
+        "credit_limit": float(row.get("credit_limit", 0) or 100000),
+        "account_balance": float(row.get("account_balance", 0) or 50000),
+      }
+      transactions_db[txn_id] = txn_data
+      created += 1
+
+    except Exception as e:
+      errors.append(f"Row {row_num}: {str(e)}")
+
+    return UploadResult(
+      total_rows=row_count,
+      parsed=created,
+      parse_errors=len(errors),
+      created=created,
+      errors=errors
+    )
+
+@app.post("/transactions/batch", response_model = BatchResult)
+async def create_batch(batch: BatchTransactionCreate):
+  results, successful, failed = [], 0, 0
+
+  for txn in batch.transactions:
+    try:
+      txn_id = generate_id()
+      now = datetime.now().isoformat()
+
+      txn_data = {
+        "id": txn_id,
+        "amount": txn.amount,
+        "currency": txn.currency,
+        "type": txn.type.value,
+        "status": TransactionStatusEnum.PENDING.value,
+        "created_at": now,
+        "credit_limit": txn.credit_limit,
+          "account_balance": txn.account_balance,
+        }
+      transactions_db[txn_id] = txn_data
+      results.append({"id": txn_id, "status": "created"})
+      successful += 1
+
+    except Exception as e:
+      results.append({"error": str(e)})
+      failed += 1
+
+    return BatchResult(
+      total=len(batch.transactions),
+      successful=successful,
+      failed=failed,
+      results=results,
+    )
+
+@app.post("/transactions/process_all", response_model = BatchResult)
+async def process_all_pending():
+  results, successful, failed = [], 0, 0
+  pending = {
+    txn_id: txn_data
+    for txn_id, txn_data in transactions_db.items()
+    if txn_data["status"] == TransactionStatusEnum.PENDING.value
+  }
+
+  for txn_id, txn_data in pending.items():
+    try:
+      if txn_data["type"] == TransactionType.CREDIT.value:
+        limit = txn_data.get("credit_limit") or 100000
+        if txn_data["amount"] > limit:
+          txn_data["status"] = TransactionStatusEnum.FAILED.value
+          results.append({"id": txn_id, "status": "FAILED", "reason": "Credit limit exceeded"})
+          failed += 1
+          continue
+
+        elif txn_data["type"] == TransactionType.DEBIT.value:
+          balance = txn_data.get("account_balance") or 50000
+          if txn_data["amount"] > balance:
+            txn_data["status"] = TransactionStatusEnum.FAILED.value
+            results.append({"id": txn_id, "status": "FAILED", "reason": "Insufficient balance"})
+            failed += 1
+            continue
+
+        txn_data["status"] = TransactionStatusEnum.COMPLETED.value
+        results.append({"id": txn_id, "status": "COMPLETED"})
+        successful += 1
+
+    except Exception as e:
+      txn_data["status"] = TransactionStatusEnum.FAILED.value
+      results.append({"id": txn_id, "status": "FAILED", "reason": str(e)})
+      failed += 1
+
+    return BatchResult(
+        total=len(pending),
+        successful=successful,
+        failed=failed,
+        results=results,
+    )
+  
+@app.get("/export/csv")
+async def export_csv(status: Optional[str] = None):
+  txns = list(transactions_db.values())
+  if status:
+    txns  = [t for t in txns if t["status"] == status.upper()]
+
+  output = io.StringIO()
+  fieldnames = ["id", "type", "amount", "currency", "status", "created_at"]
+  writer = csv.DictWriter(output, fieldnames=fieldnames)
+  writer.writeheader()
+
+  for txn in txns:
+    writer.writerow({
+      "id": txn["id"],
+      "type": txn["type"],
+      "amount": txn["amount"],
+      "currency": txn["currency"],
+      "status": txn["status"],
+      "created_at": txn["created_at"],
+    })
+
+  output.seek(0)
+
+  return StreamingResponse(
+    output,
+    media_type="text/csv",
+    headers={"Content-Disposition": "attachment; filename=transactions.csv"},
+  )

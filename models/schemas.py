@@ -2,18 +2,15 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from enum import Enum
 
-
 class TransactionType(str, Enum):
   CREDIT = "CREDIT"
   DEBIT = "DEBIT"
-
 
 class TransactionStatusEnum(str, Enum):
   PENDING = "PENDING"
   COMPLETED = "COMPLETED"
   FAILED = "FAILED"
   REVERSED = "REVERSED"
-
 
 # ──────────────────────────────────────────────────
 # Request schemas — what comes IN from the API user
@@ -64,17 +61,14 @@ class TransactionCreate(BaseModel):
   def credit_debit_fields_check(cls, v, info):
     return v
 
-
 class TransactionUpdate(BaseModel):
   status: Optional[TransactionStatusEnum] = None
   amount: Optional[float] = Field(default=None, gt=0)
   currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
 
-
 # ──────────────────────────────────────────────────
 # Response schemas — what goes OUT to the API user
 # ──────────────────────────────────────────────────
-
 class TransactionResponse(BaseModel):
   id: str
   amount: float
@@ -84,7 +78,6 @@ class TransactionResponse(BaseModel):
   created_at: str
   model_config = {"from_attributes": True}
 
-
 class ProcessingSummary(BaseModel):
   total: int
   completed: int
@@ -93,7 +86,22 @@ class ProcessingSummary(BaseModel):
   total_amount: float
   by_currency: dict[str, int]
 
-
 class ErrorResponse(BaseModel):
   detail: str
   error_code: Optional[str] = None
+
+class BatchTransactionCreate(BaseModel):
+  transactions: list[TransactionCreate]
+
+class BatchResult(BaseModel):
+  total: int
+  successful: int
+  failed: int
+  results: list[dict]
+
+class UploadResult(BaseModel):
+  total_rows: int
+  parsed: int
+  parse_errors: int
+  created: int
+  errors: list[str]
