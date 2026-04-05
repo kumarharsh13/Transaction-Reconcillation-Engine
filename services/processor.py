@@ -23,14 +23,14 @@ class TransactionProcessor:
   def add_many(self, transactions: list[Transaction]) -> None:
     self.transactions.extend(transactions)
 
-  def process_all(self) -> None:
+  def process_all(self) -> list[TransactionResult]:
     self.results = []
 
     for txn in self.transactions:
       result = self._process_single(txn)
       self.results.append(result)
 
-      return self.results
+    return self.results
     
   def _process_single(self, txn: Transaction) -> TransactionResult:
     try:

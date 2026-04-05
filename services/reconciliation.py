@@ -78,15 +78,15 @@ class ReconciliationEngine:
         txn.status = TransactionStatus.FAILED
         failed_count += 1
 
-      total = completed_count + failed_count
-      print()
-      print(f"  Processed:  {total} transactions")
-      print(f"  Completed:  {completed_count}")
-      print(f"  Failed:     {failed_count}")
-      print(f"  Total amt:  ₹{total_amount:,.2f}")
-      print()
-      print("  (Memory usage: minimal — one row at a time)")
-      print("=" * 55)
+    total = completed_count + failed_count
+    print()
+    print(f"  Processed:  {total} transactions")
+    print(f"  Completed:  {completed_count}")
+    print(f"  Failed:     {failed_count}")
+    print(f"  Total amt:  ₹{total_amount:,.2f}")
+    print()
+    print("  (Memory usage: minimal — one row at a time)")
+    print("=" * 55)
 
 
   def _print_final_report(self,input_file: str,output_dir: str,completed: list[Transaction],failed: list[Transaction]) -> None:
