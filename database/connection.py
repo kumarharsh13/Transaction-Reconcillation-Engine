@@ -1,7 +1,9 @@
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = "postgresql://localhost/transaction_engine"
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/transaction_engine")
 
 # ── Engine ────────────────────────────────────────
 # Engine = the actual connection to PostgreSQL

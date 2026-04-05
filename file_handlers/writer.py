@@ -1,5 +1,4 @@
 import csv
-from xml.parsers.expat import errors
 from models.transaction import (
   Transaction,
   TransactionStatus,

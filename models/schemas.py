@@ -45,8 +45,8 @@ class TransactionCreate(BaseModel):
     description="Account balance (only for DEBIT type)",
   )
 
-    # ── Custom validators ──────────────────────
-    # These run AFTER Pydantic's built-in type checks
+  # ── Custom validators ──────────────────────
+  # These run AFTER Pydantic's built-in type checks
 
   @field_validator("currency")
   @classmethod

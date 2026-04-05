@@ -50,11 +50,7 @@ async def create_transaction(txn: TransactionCreate):
   return txn_data 
 
 @app.get("/transactions/", response_model = list[TransactionResponse])
-async def list_transactions():
-  status: Optional[str] = None
-  currency: Optional[str] = None
-  min_amount: Optional[float] = None
-
+async def list_transactions(status: Optional[str] = None, currency: Optional[str] = None, min_amount: Optional[float] = None):
   result = list(transactions_db.values())
 
   if status:
@@ -87,7 +83,7 @@ async def update_transaction(txn_id: str, update: TransactionUpdate):
 
   return txn_data
 
-@app.get("/transactions/delete/{txn_id}")
+@app.delete("/transactions/{txn_id}")
 async def delete_transaction(txn_id: str):
     if txn_id not in transactions_db:
       raise HTTPException(status_code = 404, detail = f"Transaction {txn_id} not found")
@@ -108,17 +104,17 @@ async def process_transaction(txn_id: str):
   if txn_data["type"] == TransactionType.CREDIT.value:
     limit = txn_data.get("credit_limit") or 100000
     if txn_data["amount"] > limit:
-        txn_data["status"] = TransactionStatusEnum.FAILED.value
-        return txn_data
-    elif txn_data["type"] == TransactionType.DEBIT.value:
-      balance = txn_data.get("account_balance") or 50000
-      if txn_data["amount"] > balance:
-        txn_data["status"] = TransactionStatusEnum.FAILED.value
-        return txn_data
+      txn_data["status"] = TransactionStatusEnum.FAILED.value
+      return txn_data
+  elif txn_data["type"] == TransactionType.DEBIT.value:
+    balance = txn_data.get("account_balance") or 50000
+    if txn_data["amount"] > balance:
+      txn_data["status"] = TransactionStatusEnum.FAILED.value
+      return txn_data
 
-    txn_data["status"] = TransactionStatusEnum.COMPLETED.value
-    return txn_data
-  
+  txn_data["status"] = TransactionStatusEnum.COMPLETED.value
+  return txn_data
+
 @app.get("/analytics/summary", response_model=ProcessingSummary)
 async def get_summary():
   all_txns = list(transactions_db.values())
@@ -185,13 +181,13 @@ async def upload_csv(file: UploadFile = File(...)):
     except Exception as e:
       errors.append(f"Row {row_num}: {str(e)}")
 
-    return UploadResult(
-      total_rows=row_count,
-      parsed=created,
-      parse_errors=len(errors),
-      created=created,
-      errors=errors
-    )
+  return UploadResult(
+    total_rows=row_count,
+    parsed=created,
+    parse_errors=len(errors),
+    created=created,
+    errors=errors
+  )
 
 @app.post("/transactions/batch", response_model = BatchResult)
 async def create_batch(batch: BatchTransactionCreate):
@@ -210,8 +206,8 @@ async def create_batch(batch: BatchTransactionCreate):
         "status": TransactionStatusEnum.PENDING.value,
         "created_at": now,
         "credit_limit": txn.credit_limit,
-          "account_balance": txn.account_balance,
-        }
+        "account_balance": txn.account_balance,
+      }
       transactions_db[txn_id] = txn_data
       results.append({"id": txn_id, "status": "created"})
       successful += 1
@@ -220,12 +216,12 @@ async def create_batch(batch: BatchTransactionCreate):
       results.append({"error": str(e)})
       failed += 1
 
-    return BatchResult(
-      total=len(batch.transactions),
-      successful=successful,
-      failed=failed,
-      results=results,
-    )
+  return BatchResult(
+    total=len(batch.transactions),
+    successful=successful,
+    failed=failed,
+    results=results,
+  )
 
 @app.post("/transactions/process_all", response_model = BatchResult)
 async def process_all_pending():
@@ -246,29 +242,29 @@ async def process_all_pending():
           failed += 1
           continue
 
-        elif txn_data["type"] == TransactionType.DEBIT.value:
-          balance = txn_data.get("account_balance") or 50000
-          if txn_data["amount"] > balance:
-            txn_data["status"] = TransactionStatusEnum.FAILED.value
-            results.append({"id": txn_id, "status": "FAILED", "reason": "Insufficient balance"})
-            failed += 1
-            continue
+      elif txn_data["type"] == TransactionType.DEBIT.value:
+        balance = txn_data.get("account_balance") or 50000
+        if txn_data["amount"] > balance:
+          txn_data["status"] = TransactionStatusEnum.FAILED.value
+          results.append({"id": txn_id, "status": "FAILED", "reason": "Insufficient balance"})
+          failed += 1
+          continue
 
-        txn_data["status"] = TransactionStatusEnum.COMPLETED.value
-        results.append({"id": txn_id, "status": "COMPLETED"})
-        successful += 1
+      txn_data["status"] = TransactionStatusEnum.COMPLETED.value
+      results.append({"id": txn_id, "status": "COMPLETED"})
+      successful += 1
 
     except Exception as e:
       txn_data["status"] = TransactionStatusEnum.FAILED.value
       results.append({"id": txn_id, "status": "FAILED", "reason": str(e)})
       failed += 1
 
-    return BatchResult(
-        total=len(pending),
-        successful=successful,
-        failed=failed,
-        results=results,
-    )
+  return BatchResult(
+    total=len(pending),
+    successful=successful,
+    failed=failed,
+    results=results,
+  )
   
 @app.get("/export/csv")
 async def export_csv(status: Optional[str] = None):

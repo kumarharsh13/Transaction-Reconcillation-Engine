@@ -95,6 +95,14 @@ class TransactionRepository:
     
     return {status: count for status, count in results}
 
+  def count_by_currency(self, db: Session) -> dict[str, int]:
+    results = (
+      db.query(TransactionDB.currency, func.count(TransactionDB.id))
+      .group_by(TransactionDB.currency)
+      .all()
+    )
+    return {currency: count for currency, count in results}
+
   def total_amount_by_status(self, db: Session) -> dict[str, float]:
 
     results = (

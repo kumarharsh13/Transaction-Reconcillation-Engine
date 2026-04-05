@@ -1,6 +1,8 @@
 import uuid
 
+from tasks.transaction_tasks import process_transaction as process_transaction_task, process_batch, generate_report
 from fastapi import FastAPI, HTTPException, Depends
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime
@@ -123,8 +125,8 @@ def process_transaction(txn_id: str,db: Session = Depends(get_db)):
 # ── GET /analytics/summary ───────────────────────
 @app.get("/analytics/summary", response_model=ProcessingSummary)
 def get_summary(db: Session = Depends(get_db)):
-  all_txns = repo.get_all(db)
-  total = len(all_txns)
+  status_counts = repo.count_by_status(db)
+  total = sum(status_counts.values())
 
   if total == 0:
     return ProcessingSummary(
@@ -132,15 +134,13 @@ def get_summary(db: Session = Depends(get_db)):
       success_rate=0, total_amount=0, by_currency={},
     )
 
-  status_counts = repo.count_by_status(db)
   completed_count = status_counts.get("COMPLETED", 0)
   failed_count = status_counts.get("FAILED", 0)
 
   amount_by_status = repo.total_amount_by_status(db)
   total_amount = amount_by_status.get("COMPLETED", 0)
 
-  from collections import Counter
-  currency_counts = Counter(t.currency for t in all_txns)
+  currency_counts = repo.count_by_currency(db)
 
   return ProcessingSummary(
     total=total,
@@ -148,7 +148,7 @@ def get_summary(db: Session = Depends(get_db)):
     failed=failed_count,
     success_rate=round(completed_count / total * 100, 1) if total > 0 else 0,
     total_amount=total_amount,
-    by_currency=dict(currency_counts),
+    by_currency=currency_counts,
   )
 
 
@@ -157,10 +157,10 @@ def get_summary(db: Session = Depends(get_db)):
 def health_check(db: Session = Depends(get_db)):
   """Health check — also verifies database connection"""
   try:
-    count = len(repo.get_all(db))
-    return {"status": "healthy", "database": "connected", "transactions": count}
+    db.execute(text("SELECT 1"))
+    return {"status": "healthy", "database": "connected"}
   except Exception as e:
-    return {"status": "unhealthy", "database": str(e)}
+    raise HTTPException(status_code=503, detail={"status": "unhealthy", "database": str(e)})
 
 
 # ── Helper: Convert DB model to response dict ────
@@ -180,3 +180,78 @@ def _to_response(txn: TransactionDB) -> dict:
     "status": txn.status,
     "created_at": txn.created_at.isoformat() if txn.created_at else "",
   }
+
+# ── POST /jobs/process/{txn_id} — Background process ─
+@app.post("/jobs/process/{txn_id}")
+def enqueue_process(txn_id: str, db: Session = Depends(get_db)):
+  txn = repo.get_by_id(db, txn_id)
+  if not txn:
+    raise HTTPException(status_code=404, detail=f"Transaction {txn_id} not found")
+
+  if txn.status != "PENDING":
+    raise HTTPException(status_code=400, detail=f"Transaction already {txn.status}")
+
+  task = process_transaction_task.delay(txn_id)
+
+  return {
+    "task_id": task.id,
+    "status": "queued",
+    "message": f"Transaction {txn_id} queued for processing",
+  }
+
+
+# ── POST /jobs/process-batch — Background batch process ─
+@app.post("/jobs/process-batch")
+def enqueue_batch_process(db: Session = Depends(get_db)):
+  pending_txns = repo.get_by_status(db, "PENDING")
+
+  if not pending_txns:
+    return {"message": "No pending transactions to process"}
+
+  txn_ids = [txn.id for txn in pending_txns]
+
+  task = process_batch.delay(txn_ids)
+
+  return {
+    "task_id": task.id,
+    "status": "queued",
+    "pending_count": len(txn_ids),
+    "message": f"{len(txn_ids)} transactions queued for processing",
+  }
+
+
+# ── POST /jobs/report — Background report generation ─
+@app.post("/jobs/report")
+def enqueue_report():
+    task = generate_report.delay()
+
+    return {
+      "task_id": task.id,
+      "status": "queued",
+      "message": "Report generation started",
+    }
+
+
+# ── GET /jobs/{task_id} — Check task status ──────
+@app.get("/jobs/{task_id}")
+def get_task_status(task_id: str):
+  from tasks.celery_app import celery_app
+
+  # AsyncResult fetches task info from Redis
+  result = celery_app.AsyncResult(task_id)
+
+
+  response = {
+      "task_id": task_id,
+      "status": result.status,
+  }
+
+  # If task is done, include the result
+  if result.ready():
+      response["result"] = result.result
+
+  # If task failed, include the error
+  if result.failed():
+      response["error"] = str(result.result)
+
+  return response

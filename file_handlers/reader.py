@@ -15,8 +15,8 @@ class TransactionFileReader:
     with open(file_path, mode = 'r') as file:
       reader = csv.DictReader(file)
 
-      for row_count, row in enumerate(reader, start = 2):
-        row_count += 1
+      for row_num, row in enumerate(reader, start = 2):
+        row_count = row_num
         try:
           txn = self._parse_transaction(row)
           transactions.append(txn)

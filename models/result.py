@@ -8,5 +8,5 @@ class TransactionResult:
 
   def __str__(self) -> str:
     if self.success:
-      return f"✅ {self.transaction} - {self.error_message}"
-    return f"❌ {self.transaction} - {self.error_message}"
+      return f"OK {self.transaction}"
+    return f"FAIL {self.transaction} - {self.error_message}"
