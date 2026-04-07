@@ -1,0 +1,95 @@
+# ──────────────────────────────────────────────────
+# docker-compose.yml — runs ALL services together
+#
+# One command starts everything:
+#   docker compose up
+#
+# This creates 4 containers:
+#   1. app      — your FastAPI application
+#   2. db       — PostgreSQL database
+#   3. redis    — Redis (for Celery job queue)
+#   4. worker   — Celery worker (processes background jobs)
+# ──────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL Database ─────────────────────────
+  # Like having PostgreSQL auto-installed and configured
+  db:
+    image: postgres:15
+    # 'image' = use this pre-built container from Docker Hub
+    # No Dockerfile needed — someone already built it
+
+    environment:
+      POSTGRES_DB: transaction_engine
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    # These env vars configure Postgres automatically
+    # Like editing database.yml in Rails
+
+    ports:
+      - "5432:5432"
+    # Maps port 5432 inside container to 5432 on your machine
+    # So you can still connect with psql from your terminal
+
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # 'volumes' = persist data even when container stops
+    # Without this, data disappears when you stop Docker
+    # Like a USB drive that the container uses for storage
+
+
+  # ── Redis ───────────────────────────────────────
+  redis:
+    image: redis:8
+
+    ports:
+      - "6379:6379"
+
+
+  # ── Your FastAPI App ────────────────────────────
+  app:
+    build: .
+    # 'build: .' = build from Dockerfile in current directory
+    # Unlike db and redis which use pre-built images,
+    # YOUR app needs to be built from your code
+
+    ports:
+      - "8000:8000"
+
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/transaction_engine
+      REDIS_URL: redis://redis:6379/0
+    # Note: 'db' and 'redis' are hostnames here, not 'localhost'
+    # Inside Docker, containers talk to each other by service NAME
+    # 'db' resolves to the PostgreSQL container
+    # 'redis' resolves to the Redis container
+
+    depends_on:
+      - db
+      - redis
+    # Don't start the app until db and redis are running
+
+
+  # ── Celery Worker ───────────────────────────────
+  worker:
+    build: .
+    # Same code as the app, but runs Celery instead of FastAPI
+
+    command: celery -A tasks.celery_app worker --loglevel=info
+    # Override the default CMD from Dockerfile
+    # Instead of starting uvicorn, start the Celery worker
+
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/transaction_engine
+      REDIS_URL: redis://redis:6379/0
+
+    depends_on:
+      - db
+      - redis
+
+
+# ── Volumes ───────────────────────────────────────
+# Named volume for PostgreSQL data persistence
+volumes:
+  pgdata:
